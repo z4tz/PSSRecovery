@@ -1,0 +1,18 @@
+[package]
+name = "resetplc"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "resetplc"
+path = "src/main.rs"
+
+[[bin]]
+name = "testing"
+path = "src/testing.rs"
+
+[dependencies]
+iced = { version = "0.13.1", features = ["tokio"] }
+tokio = { version = "1.43.0", features = ["full"] }
+rseip = { version = "0.3.1"}
+
