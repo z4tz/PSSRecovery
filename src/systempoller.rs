@@ -1,14 +1,15 @@
 mod multipinger;
-mod importer;
+pub mod importer;
 mod plc_comms;
 
 use std::collections::HashMap;
 use iced::futures::{SinkExt, Stream};
 use iced::futures::channel::mpsc;
 use iced::stream;
-use tokio::time::{sleep, Duration};
-use multipinger::{Multipinger, ping_all};
-use importer::{import, default_filename};
+use tokio::time::{sleep, Duration, Instant};
+use multipinger::{Multipinger};
+use importer::{import, get_filename};
+use plc_comms::{read_and_reset};
 
 #[derive(Clone, Debug)]
 pub(crate) enum Event{
@@ -23,31 +24,52 @@ pub fn testpoller() -> impl Stream<Item = Event> {
         let _ = output.send(Event::Setup(sender)).await;
         let mut to_reset: Vec<String> = vec![];
 
-        let mut system_infos: HashMap<String, SystemInfo> = import(&default_filename()).await;
-        let pinger = Multipinger::new(vec!["google.com".to_string()]);
+        let mut system_infos: HashMap<String, SystemInfo> = import(&get_filename()).await;
+
+        let addresses_to_ping: Vec<String> = system_infos.values()
+            .map(|sys| sys.get_addresses()).flatten().collect();
+        let pinger = Multipinger::new(addresses_to_ping);
 
         loop {
-            // todo: check time for loop live and decide on period.
+            let start = Instant::now();
 
             loop { // fetch all waiting resets
                 match receiver.try_next() {
-                    Ok(Some(message)) => {println!("will reset {:?}", message);to_reset.push(message);},
+                    Ok(Some(message)) => {to_reset.push(message);},
                     _ => {break;}
                 }
             }
+            
 
-            // todo: PLC interactions
-
-            let ping_results = ping_all(pinger.addresses.clone(), pinger.arguments.clone()).await;
-
-            // update each system info and send over a clone
+            let ping_results = pinger.ping_all().await;
+            // update each system info
             for (_, system_info) in system_infos.iter_mut() {
                 system_info.update_eth(&ping_results);
                 system_info.update_nodes(&ping_results);
+            }
+            
+            let plc_interactions: Vec<(String, String, bool)> = system_infos.iter()
+                .map(|(name, sys)| (name.to_string(), sys.get_eth_address(), to_reset.contains(&sys.name)))
+                .collect();
+            
+            let plc_results = read_and_reset(plc_interactions).await;
+            for (system_name, res) in plc_results {
+                system_infos.get_mut(&system_name).unwrap().alarms_active = res;
+            }
+            
+            // Send updated clone to GUI
+            for (_, system_info) in system_infos.iter_mut() {
                 let _ = output.send(Event::Update(system_info.clone())).await;
             }
-
-            sleep(Duration::from_secs(1)).await;
+            
+            
+           to_reset.clear();
+            
+            let elapsed = start.elapsed();
+            println!("Scan took {elapsed:?}");
+            if elapsed < Duration::from_secs(3) {
+                sleep(Duration::from_secs(3) - elapsed).await;    
+            }
         }
     })
 }
@@ -58,36 +80,13 @@ pub struct SystemInfo {
     pub name: String,
     plc_eths: Vec<Host>,
     plc_nodes: Vec<Host>,
-    plc_comms_ok: bool,
-    alarms_active: bool,
+    alarms_active: Option<bool>,
 }
 impl SystemInfo {
+    // "backend methods
     pub fn new(system_name: String) -> Self {
         SystemInfo {
             name: system_name, ..Default::default()
-        }
-    }
-
-    pub fn eth_count(&self) -> usize {
-        self.plc_eths.len()
-    }
-    pub fn eth_responding_count(&self) -> usize {
-        self.plc_eths.iter().filter(|host| host.responding).count()
-    }
-
-    pub fn nodes_count(&self) -> usize {
-        self.plc_nodes.len()
-    }
-    pub fn nodes_responding_count(&self) -> usize {
-        self.plc_nodes.iter().filter(|host| host.responding).count()
-    }
-
-    pub fn active_alarms(&self) -> String {
-        if !self.plc_comms_ok {
-            return "Unknown".to_string();
-        }
-        else {
-            return self.alarms_active.to_string();
         }
     }
     pub fn add_eth(&mut self, host: Host) {
@@ -109,6 +108,41 @@ impl SystemInfo {
         }
     }
 
+    pub fn get_addresses(&self) -> Vec<String> {
+        let mut addresses = vec![];
+        for host in self.plc_eths.iter() {
+            addresses.push(host.ip_address.to_string());
+        }
+        for host in self.plc_nodes.iter() {
+            addresses.push(host.ip_address.to_string());
+        }
+        addresses
+    }
+
+    pub fn get_eth_address(&self) -> String {
+        // return first responding eth
+        for host in self.plc_eths.iter() {
+            if host.responding {
+                return host.ip_address.to_string();
+            }
+        }
+        // if none are responsive return first
+        self.plc_eths.first().unwrap().ip_address.to_string()
+    }
+    
+    // "front end" methods
+    pub fn eth_status(&self) -> String {
+        format!("{}/{}", self.plc_eths.iter().filter(|host| host.responding).count(), self.plc_eths.len())
+    }
+    
+    pub fn nodes_status(&self) -> String {
+        format!("{}/{}", self.plc_nodes.iter().filter(|host| host.responding).count(), self.plc_nodes.len())
+    }
+    
+    pub fn active_alarms(&self) -> Option<bool> {
+        self.alarms_active
+    }
+    
     pub fn failed_eths(&self) -> String {
         self.plc_eths.iter()
             .fold(String::new(), |mut acc, host| {
@@ -119,11 +153,19 @@ impl SystemInfo {
 
     pub fn failed_nodes(&self) -> String {
         self.plc_nodes.iter()
-        .fold(String::new(), |mut acc, host| {
-            if !host.responding {acc.push_str(&host.hostname)};
-            acc
-        })
+            .fold(String::new(), |mut acc, host| {
+                if !host.responding {acc.push_str(&host.hostname)};
+                acc
+            })
     }
+    
+    pub fn eths_ok(&self) -> bool {
+        self.plc_eths.iter().all(|host| host.responding)
+    }
+    pub fn nodes_ok(&self) -> bool {
+        self.plc_nodes.iter().all(|host| host.responding)
+    }
+    
 }
 
 #[derive(Clone, Debug)]

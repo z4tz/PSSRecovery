@@ -12,8 +12,8 @@ pub async fn import(filename: &str) -> HashMap<String, SystemInfo> {
         if parts.len() != 2 {  // if invalid line, skip it.
             continue;
         }
-        let hostname = parts[0].to_string();
-        let ip_address = parts[1].to_string();
+        let hostname = parts[0].trim().to_string();
+        let ip_address = parts[1].trim().to_string();
         let system_name = hostname.split("_").collect::<Vec<&str>>()[0].to_string();
         let system_info = system_infos.entry(system_name.clone()).or_insert(SystemInfo::new(system_name));
         if hostname.to_lowercase().contains("eth") {
@@ -26,11 +26,19 @@ pub async fn import(filename: &str) -> HashMap<String, SystemInfo> {
     system_infos
 }
 
-pub fn default_filename() -> String {
+fn default_filename() -> String {
     match env::consts::OS {
         "windows" => {"ip_adresses.txt".to_string()}
         "linux" => {"ip_adresses.txt".to_string()}
         "macos" => {"ip_adresses.txt".to_string()}
         &_ => {"ip_adresses.txt".to_string()}
     }
+}
+
+pub fn get_filename() -> String {
+    let args: Vec<String> = env::args().collect();
+    if args.len() > 1 {
+        args[1].clone()
+    }
+    else { default_filename() }
 }

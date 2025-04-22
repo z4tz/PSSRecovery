@@ -17,23 +17,24 @@ impl Multipinger {
 
         }
     }
+
+    pub async fn ping_all(&self) -> HashMap<String, bool>{
+        let mut set = JoinSet::new();
+        for address in self.addresses.clone() {
+            let argument_clone = self.arguments.clone();
+            set.spawn(async move {execute_ping(address, argument_clone).await});
+        }
+        let mut map = HashMap::new();
+        while let Some(res) = set.join_next().await{
+            match res {
+                Ok((address,result)) => {map.insert(address, result);},
+                Err(_) => {}
+            }
+        }
+        map
+    }
 }
 
-pub async fn ping_all(addresses: Vec<String>, arguments: Vec<String>) -> HashMap<String, bool>{
-    let mut set = JoinSet::new();
-    for address in addresses {
-        let argument_clone = arguments.clone();
-        set.spawn(async move {execute_ping(address, argument_clone).await});
-    }
-    let mut map = HashMap::new();
-    while let Some(res) = set.join_next().await{
-        match res {
-            Ok((address,result)) => {map.insert(address, result);},
-            Err(_) => {}
-        }
-    }
-    map
-}
 
 async fn execute_ping(target: String, mut arguments: Vec<String>) -> (String, bool) {
     let mut cmd = Command::new("ping");

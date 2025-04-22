@@ -12,7 +12,7 @@ name = "testing"
 path = "src/testing.rs"
 
 [dependencies]
-iced = { version = "0.13.1", features = ["tokio"] }
+iced = { version = "0.13.1", features = ["tokio", "canvas"] }
 tokio = { version = "1.43.0", features = ["full"] }
 rseip = { version = "0.3.1"}
 
