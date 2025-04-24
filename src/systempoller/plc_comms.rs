@@ -13,7 +13,7 @@ pub async fn read_and_reset(plc_infos: Vec<(String, String, bool)>) -> HashMap<S
     }
     
     // ugly, but timeout on rseip calls are ~20s, instead we break after a reasonable duration
-    sleep(Duration::from_millis(500)).await;
+    sleep(Duration::from_millis(600)).await;
     set.abort_all();
     while let Some(res) = set.join_next().await{
         match res {

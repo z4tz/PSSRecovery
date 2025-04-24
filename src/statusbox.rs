@@ -16,7 +16,7 @@ pub struct StatusBox {
 }
 
 impl StatusBox {
-    pub fn new(radius: f32, status: Status) -> StatusBox {
+    fn new(radius: f32, status: Status) -> StatusBox {
         StatusBox {radius, status}
     }
 }
@@ -38,8 +38,8 @@ impl<Message> canvas::Program<Message> for StatusBox {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         
         // We create a `Path` representing a simple circle
-        let border = canvas::Path::circle(frame.center(),self.radius);
-        let circle = canvas::Path::circle(frame.center(),self.radius-2.0);
+        let border = canvas::Path::circle(frame.center(),self.radius-1.0);
+        let circle = canvas::Path::circle(frame.center(),self.radius-3.0);
 
         let background_color = match self.status {
             Status::Fault => {Color::from_rgb(1.0, 0.0, 0.0)}

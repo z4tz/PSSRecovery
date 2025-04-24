@@ -12,7 +12,7 @@ use importer::{import, get_filename};
 use plc_comms::{read_and_reset};
 
 #[derive(Clone, Debug)]
-pub(crate) enum Event{
+pub enum Event{
     Setup(mpsc::Sender<String>),
     Update(SystemInfo),
 }
@@ -39,7 +39,6 @@ pub fn testpoller() -> impl Stream<Item = Event> {
                     _ => {break;}
                 }
             }
-            
 
             let ping_results = pinger.ping_all().await;
             // update each system info
@@ -62,13 +61,12 @@ pub fn testpoller() -> impl Stream<Item = Event> {
                 let _ = output.send(Event::Update(system_info.clone())).await;
             }
             
-            
-           to_reset.clear();
+            to_reset.clear();
             
             let elapsed = start.elapsed();
             println!("Scan took {elapsed:?}");
-            if elapsed < Duration::from_secs(3) {
-                sleep(Duration::from_secs(3) - elapsed).await;    
+            if elapsed < Duration::from_millis(3000) {
+                sleep(Duration::from_millis(2000)).await;    
             }
         }
     })
@@ -143,20 +141,14 @@ impl SystemInfo {
         self.alarms_active
     }
     
-    pub fn failed_eths(&self) -> String {
-        self.plc_eths.iter()
-            .fold(String::new(), |mut acc, host| {
-                if !host.responding {acc.push_str(&host.hostname)};
-                acc
-            })
-    }
-
-    pub fn failed_nodes(&self) -> String {
-        self.plc_nodes.iter()
-            .fold(String::new(), |mut acc, host| {
-                if !host.responding {acc.push_str(&host.hostname)};
-                acc
-            })
+    pub fn failed_hosts(&self) -> String {
+        let mut failed_hosts = vec![];
+        failed_hosts.extend(self.plc_eths.iter().filter(|host| !host.responding));
+        failed_hosts.extend(self.plc_nodes.iter().filter(|host| !host.responding));
+        failed_hosts.into_iter()
+            .map(|host| host.hostname.to_string())
+            .collect::<Vec<String>>()
+            .join("\n")
     }
     
     pub fn eths_ok(&self) -> bool {
