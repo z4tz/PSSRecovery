@@ -1,5 +1,5 @@
 mod multipinger;
-pub mod importer;
+mod importer;
 mod plc_comms;
 
 use std::collections::HashMap;
@@ -19,7 +19,6 @@ pub enum Event{
 
 pub fn testpoller() -> impl Stream<Item = Event> {
     stream::channel(1000, |mut output| async move {
-
         let (sender, mut receiver) = mpsc::channel(1000);
         let _ = output.send(Event::Setup(sender)).await;
         let mut to_reset: Vec<String> = vec![];
@@ -157,7 +156,6 @@ impl SystemInfo {
     pub fn nodes_ok(&self) -> bool {
         self.plc_nodes.iter().all(|host| host.responding)
     }
-    
 }
 
 #[derive(Clone, Debug)]

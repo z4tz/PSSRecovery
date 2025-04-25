@@ -18,7 +18,6 @@ enum Message {
     ShowPopup(PopupState),
     HidePopup,
     CopyPopupText
-
 }
 enum State {
     Loading,
@@ -31,7 +30,6 @@ enum PopupState {
     ShowAll
 }
 
-
 struct RecoveryApp {
     system_map: HashMap<String, SystemInfo>,
     state: State,
@@ -39,7 +37,6 @@ struct RecoveryApp {
 }
 
 impl RecoveryApp {
-
     fn new() -> (Self, Task<Message>) {
         (RecoveryApp {
             system_map: HashMap::new(),
@@ -55,7 +52,11 @@ impl RecoveryApp {
                 
                 //top row with buttons
                 let mut column = Column::new().width(Length::Fill).align_x(Center);
-                let button_row = row![button("Reset all").on_press(Message::ResetAll), button("All hosts info").on_press(Message::ShowPopup(PopupState::ShowAll))];
+                let button_row = row![
+                    button("Load config"),
+                    button("Reset all").on_press(Message::ResetAll),
+                    button("All hosts info").on_press(Message::ShowPopup(PopupState::ShowAll))
+                ].spacing(10);
                 column = column.push(button_row);
                 
                 //system views
@@ -69,21 +70,22 @@ impl RecoveryApp {
                 }
                 column = column.push(row);
                 let content = container(column).width(Length::Fill).height(Length::Fill);
+                
                 match &self.popup_state {
                     PopupState::Hidden => {
                         content.into()
                     }
-                    _ => {
+                    _ => {  // showSystem and showAll
                         let popup = container(
                             column!(
                             text("Hosts not responding:" ).size(20),
                             scrollable(text(self.popup_text()).width(Length::Fill).size(15)).height(Length::Fill),
                             row!(
-                                    button("Copy text").on_press(Message::CopyPopupText),
-                                    horizontal_space().width(Length::Fill),
-                                    button("OK").on_press(Message::HidePopup),
+                                button("Copy text").on_press(Message::CopyPopupText),
+                                horizontal_space().width(Length::Fill),
+                                button("OK").on_press(Message::HidePopup),
                                 )
-                        ).spacing(10)
+                            ).spacing(10)
                         ).width(500).height(400).style(container::rounded_box).padding(10);
                         modal(content, popup, Message::HidePopup)
                     }
@@ -106,15 +108,17 @@ impl RecoveryApp {
                     }
                 }
             }
-            Message::Reset(id) => {
+            
+            Message::Reset(system_name) => {
                 match &mut self.state {
                     State::Running(sender) => {
-                        let _ = sender.try_send(id).unwrap();
+                        let _ = sender.try_send(system_name).unwrap();
                         Task::none()
                     }
                     State::Loading => {Task::none()}
                 }
             }
+            
             Message::ResetAll => {
                 match &mut self.state {
                     State::Running(sender) => {
@@ -125,16 +129,20 @@ impl RecoveryApp {
                     State::Loading => {Task::none()}
                 }
             }
+            
             Message::ShowPopup(popup_state) => {
                 self.popup_state = popup_state;
                 Task::none()
             }
+            
             Message::HidePopup => {
                 self.popup_state = PopupState::Hidden;
                 Task::none()
-                
             }
-            Message::CopyPopupText => {clipboard::write(self.popup_text())}
+            
+            Message::CopyPopupText => {
+                clipboard::write(self.popup_text())
+            }
         }
     }
 
@@ -185,10 +193,11 @@ fn system_view(system_info: &SystemInfo) -> Element<Message> {
     };
     let active_alarms_status = match system_info.active_alarms() {
         None => {Status::Fault}
-        Some(value) => {match value {
-            true => {Status::Warning}
-            false => {Status::Normal}
-        }
+        Some(value) => {
+            match value {
+                true => {Status::Warning}
+                false => {Status::Normal}
+            }
         }
     };
 
@@ -212,10 +221,7 @@ fn modal<'a, Message>(
     base: impl Into<Element<'a, Message>>,
     content: impl Into<Element<'a, Message>>,
     on_blur: Message,
-) -> Element<'a, Message>
-where
-    Message: Clone + 'a,
-{
+) -> Element<'a, Message> where Message: Clone + 'a, {
     stack![
         base.into(),
         opaque(
