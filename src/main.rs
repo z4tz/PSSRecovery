@@ -5,9 +5,10 @@ use std::collections::HashMap;
 use iced::{Center, Color, Element, Length, Subscription, Task};
 use iced::futures::channel::mpsc::Sender;
 use iced::Theme;
-use iced::widget::{text, column, button, row, container, stack, opaque, mouse_area, center, scrollable, Row, Column, horizontal_space};
+use iced::widget::{text, column, button, row, container, stack, opaque, mouse_area, center, scrollable, Row, Column, horizontal_space, vertical_space};
 use iced::clipboard;
-use crate::systempoller::{SystemInfo, testpoller, Event};
+use rfd::{AsyncFileDialog};
+use crate::systempoller::{SystemInfo, testpoller, Event, BackgroundMessage};
 use crate::statusbox::{ status_box, Status};
 
 #[derive(Debug, Clone)]
@@ -17,17 +18,20 @@ enum Message {
     ResetAll,
     ShowPopup(PopupState),
     HidePopup,
-    CopyPopupText
+    CopyPopupText,
+    FileDialog,
+    LoadConfig(Option<String>),
 }
 enum State {
     Loading,
-    Running(Sender<String>),
+    Running(Sender<BackgroundMessage>),
 }
 #[derive(Debug, Clone)]
 enum PopupState {
     Hidden,
     ShowSystem(String),
-    ShowAll
+    ShowAll,
+    ShowError(String),
 }
 
 struct RecoveryApp {
@@ -47,33 +51,62 @@ impl RecoveryApp {
 
     fn view(&self) -> Element<Message> {
         match self.state {
-            State::Loading => row!["Loading..."].into(),
+            State::Loading => row!["Waiting on background thread"].into(),
             State::Running(_) => {
                 
                 //top row with buttons
                 let mut column = Column::new().width(Length::Fill).align_x(Center);
+                let load_button = button("Load config").on_press(Message::FileDialog);
+                let reset_button = match self.system_map.is_empty() {
+                    false => button("Reset all").on_press(Message::ResetAll),
+                    true => button("Reset all")
+                };
+                let host_info_button = match self.system_map.is_empty() {
+                    false => button("All hosts info").on_press(Message::ResetAll),
+                    true => button("All hosts info")
+                };
+
                 let button_row = row![
-                    button("Load config"),
-                    button("Reset all").on_press(Message::ResetAll),
-                    button("All hosts info").on_press(Message::ShowPopup(PopupState::ShowAll))
+                    load_button,
+                    reset_button,
+                    host_info_button
                 ].spacing(10);
                 column = column.push(button_row);
                 
                 //system views
-                let mut row = Row::new();
-                for (i, system_info) in self.sorted_systems().iter().enumerate() {
-                    row = row.push(system_view(system_info));
-                    if i%4 == 3 {
-                        column = column.push(row);
-                        row = Row::new();
-                    }
+                if self.system_map.is_empty() {
+                    column = column.push(text("Waiting for config to be loaded..."))
                 }
-                column = column.push(row);
+                else {
+                    let mut row = Row::new();
+                    for (i, system_info) in self.sorted_systems().iter().enumerate() {
+                        row = row.push(system_view(system_info));
+                        if i%4 == 3 {
+                            column = column.push(row);
+                            row = Row::new();
+                        }
+                    }
+                    column = column.push(row);
+                }
+
                 let content = container(column).width(Length::Fill).height(Length::Fill);
                 
                 match &self.popup_state {
                     PopupState::Hidden => {
                         content.into()
+                    }
+                    PopupState::ShowError(error_message) => {
+                        let popup = container(
+                            column!(
+                                text("Error loading file:" ).size(20),
+                                text(error_message),
+                                row!(
+                                    horizontal_space(),
+                                    button("OK").on_press(Message::HidePopup),
+                                )
+                            )
+                        ).width(500).height(400).style(container::rounded_box).padding(10);
+                        modal(content, popup, Message::HidePopup)
                     }
                     _ => {  // showSystem and showAll
                         let popup = container(
@@ -82,7 +115,7 @@ impl RecoveryApp {
                             scrollable(text(self.popup_text()).width(Length::Fill).size(15)).height(Length::Fill),
                             row!(
                                 button("Copy text").on_press(Message::CopyPopupText),
-                                horizontal_space().width(Length::Fill),
+                                horizontal_space(),
                                 button("OK").on_press(Message::HidePopup),
                                 )
                             ).spacing(10)
@@ -106,13 +139,17 @@ impl RecoveryApp {
                         self.system_map.insert(system_info.name.clone(), system_info);
                         Task::none()
                     }
+                    Event::FileError(error_message) => {
+                        self.popup_state = PopupState::ShowError(error_message);
+                        Task::none()
+                    }
                 }
             }
             
             Message::Reset(system_name) => {
                 match &mut self.state {
                     State::Running(sender) => {
-                        let _ = sender.try_send(system_name).unwrap();
+                        let _ = sender.try_send(BackgroundMessage::Reset(system_name)).unwrap();
                         Task::none()
                     }
                     State::Loading => {Task::none()}
@@ -122,8 +159,7 @@ impl RecoveryApp {
             Message::ResetAll => {
                 match &mut self.state {
                     State::Running(sender) => {
-                        self.system_map.values()
-                            .for_each(|system_info| {let _ = sender.try_send(system_info.name.to_string()).unwrap();});
+                        let _ = sender.try_send(BackgroundMessage::ResetAll).unwrap();
                         Task::none()    
                     }
                     State::Loading => {Task::none()}
@@ -142,6 +178,24 @@ impl RecoveryApp {
             
             Message::CopyPopupText => {
                 clipboard::write(self.popup_text())
+            }
+            Message::FileDialog => {
+                Task::perform(get_filename(),Message::LoadConfig)
+            }
+            Message::LoadConfig(fileoption) => {
+                self.system_map.clear();
+                match &mut self.state {
+                    State::Loading => {}
+                    State::Running(sender) => {
+                        match fileoption {
+                            None => {}
+                            Some(filename) => {
+                                let _ = sender.try_send(BackgroundMessage::LoacFile(filename));
+                            }
+                        }
+                    }
+                }
+                Task::none()
             }
         }
     }
@@ -163,6 +217,7 @@ impl RecoveryApp {
                     .collect::<Vec<String>>()
                     .join("\n")
             }
+            _ => {"".to_string()}
         }
     }
     fn sorted_systems(&self) -> Vec<&SystemInfo> {
@@ -213,7 +268,7 @@ fn system_view(system_info: &SystemInfo) -> Element<Message> {
     let hosts_info_button = button("Hosts info").on_press(Message::ShowPopup(PopupState::ShowSystem(system_info.name.to_string())));
     let button_row = row![reset_button, hosts_info_button].spacing(10);
 
-    column![text(&system_info.name).size(20), content, button_row].align_x(Center).padding(20).into()
+    column![text(&system_info.name).size(20), content,vertical_space().height(Length::Fixed(5.0)), button_row].align_x(Center).padding(20).into()
 }
 
 // used for popup
@@ -233,10 +288,22 @@ fn modal<'a, Message>(
     ].into()
 }
 
+async fn get_filename() -> Option<String> {
+    let file = AsyncFileDialog::new()
+        .set_title("Open config file...")
+        .pick_file()
+        .await;
+
+    match file {
+        None => {None}
+        Some(handle) => {Some(handle.inner().to_str()?.to_string())}
+    }
+}
 
 fn main() -> iced::Result {
     iced::application("PSS PLC recovery program", RecoveryApp::update, RecoveryApp::view)
         .theme(|_| Theme::Light).centered()
         .subscription(RecoveryApp::subscription)
+        .antialiasing(true)
         .run_with(RecoveryApp::new)
 }

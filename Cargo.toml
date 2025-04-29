@@ -15,4 +15,5 @@ path = "src/testing.rs"
 iced = { version = "0.13.1", features = ["tokio", "canvas"] }
 tokio = { version = "1.43.0", features = ["full"] }
 rseip = { version = "0.3.1"}
+rfd = { version = "0.15.2", features = ["tokio", "file-handle-inner"]}
 

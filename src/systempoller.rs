@@ -8,67 +8,149 @@ use iced::futures::channel::mpsc;
 use iced::stream;
 use tokio::time::{sleep, Duration, Instant};
 use multipinger::{Multipinger};
-use importer::{import, get_filename};
+use importer::{import};
 use plc_comms::{read_and_reset};
 
 #[derive(Clone, Debug)]
 pub enum Event{
-    Setup(mpsc::Sender<String>),
+    Setup(mpsc::Sender<BackgroundMessage>),
     Update(SystemInfo),
+    FileError(String),
+}
+
+#[derive(Debug, Clone)]
+pub enum BackgroundMessage {
+    Reset(String),
+    ResetAll,
+    LoacFile(String),
 }
 
 pub fn testpoller() -> impl Stream<Item = Event> {
     stream::channel(1000, |mut output| async move {
-        let (sender, mut receiver) = mpsc::channel(1000);
-        let _ = output.send(Event::Setup(sender)).await;
-        let mut to_reset: Vec<String> = vec![];
+            let (sender, mut receiver) = mpsc::channel(1000);
+            let _ = output.send(Event::Setup(sender)).await;
+            let mut system_infos: HashMap<String, SystemInfo> = HashMap::new();
+            let mut to_reset: Vec<String> = vec![];
+            let mut pinger = Multipinger::new(vec![]);
 
-        let mut system_infos: HashMap<String, SystemInfo> = import(&get_filename()).await;
+            loop {
+                let start = Instant::now();
 
-        let addresses_to_ping: Vec<String> = system_infos.values()
-            .map(|sys| sys.get_addresses()).flatten().collect();
-        let pinger = Multipinger::new(addresses_to_ping);
-
-        loop {
-            let start = Instant::now();
-
-            loop { // fetch all waiting resets
+                // handle new messages
                 match receiver.try_next() {
-                    Ok(Some(message)) => {to_reset.push(message);},
-                    _ => {break;}
+                    Ok(messageoption) => {
+                        match messageoption {
+                            None => {}
+                            Some(message  ) => {
+                                match message {
+                                    BackgroundMessage::Reset(system_name) => {
+                                        to_reset.push(system_name);
+                                    }
+                                    BackgroundMessage::ResetAll => {
+                                        to_reset.extend(system_infos.keys().cloned().collect::<Vec<_>>());
+                                    }
+                                    BackgroundMessage::LoacFile(filename) => {
+                                        match import(&filename).await {
+                                            Ok(result) => {
+                                                system_infos= result;
+                                                pinger = Multipinger::new(system_infos.values()
+                                                    .map(|sys| sys.get_addresses()).flatten().collect());
+                                            }
+                                            Err(error_message) => {
+                                                let _ = output.send(Event::FileError(error_message));
+                                            }
+                                        }
+
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(_) => {}
+                }
+
+                // do the polling
+                if !system_infos.is_empty() {
+
+
+                    let ping_results = pinger.ping_all().await;
+                    // update each system info
+                    for (_, system_info) in system_infos.iter_mut() {
+                        system_info.update_eth(&ping_results);
+                        system_info.update_nodes(&ping_results);
+                    }
+
+                    let plc_interactions: Vec<(String, String, bool)> = system_infos.iter()
+                        .map(|(name, sys)| (name.to_string(), sys.get_eth_address(), to_reset.contains(&sys.name)))
+                        .collect();
+
+                    let plc_results = read_and_reset(plc_interactions).await;
+                    for (system_name, res) in plc_results {
+                        system_infos.get_mut(&system_name).unwrap().alarms_active = res;
+                    }
+
+                    // Send updated clone to GUI
+                    for (_, system_info) in system_infos.iter_mut() {
+                        let _ = output.send(Event::Update(system_info.clone())).await;
+                    }
+
+                    to_reset.clear();
+                    }
+
+                    let elapsed = start.elapsed();
+                    println!("Scan took {elapsed:?}");
+                    if elapsed < Duration::from_millis(3000) {
+                        sleep(Duration::from_millis(2000)).await;
                 }
             }
-
-            let ping_results = pinger.ping_all().await;
-            // update each system info
-            for (_, system_info) in system_infos.iter_mut() {
-                system_info.update_eth(&ping_results);
-                system_info.update_nodes(&ping_results);
-            }
-            
-            let plc_interactions: Vec<(String, String, bool)> = system_infos.iter()
-                .map(|(name, sys)| (name.to_string(), sys.get_eth_address(), to_reset.contains(&sys.name)))
-                .collect();
-            
-            let plc_results = read_and_reset(plc_interactions).await;
-            for (system_name, res) in plc_results {
-                system_infos.get_mut(&system_name).unwrap().alarms_active = res;
-            }
-            
-            // Send updated clone to GUI
-            for (_, system_info) in system_infos.iter_mut() {
-                let _ = output.send(Event::Update(system_info.clone())).await;
-            }
-            
-            to_reset.clear();
-            
-            let elapsed = start.elapsed();
-            println!("Scan took {elapsed:?}");
-            if elapsed < Duration::from_millis(3000) {
-                sleep(Duration::from_millis(2000)).await;    
-            }
+            //
+            // let mut system_infos: HashMap<String, SystemInfo> = import(&get_filename()).await;
+            //
+            // let addresses_to_ping: Vec<String> = system_infos.values()
+            //     .map(|sys| sys.get_addresses()).flatten().collect();
+            // let pinger = Multipinger::new(addresses_to_ping);
+            //
+            // loop {
+            //     let start = Instant::now();
+            //
+            //     loop { // fetch all waiting resets
+            //         match receiver.try_next() {
+            //             Ok(Some(message)) => {to_reset.push(message);},
+            //             _ => {break;}
+            //         }
+            //     }
+            //
+            //     let ping_results = pinger.ping_all().await;
+            //     // update each system info
+            //     for (_, system_info) in system_infos.iter_mut() {
+            //         system_info.update_eth(&ping_results);
+            //         system_info.update_nodes(&ping_results);
+            //     }
+            //
+            //     let plc_interactions: Vec<(String, String, bool)> = system_infos.iter()
+            //         .map(|(name, sys)| (name.to_string(), sys.get_eth_address(), to_reset.contains(&sys.name)))
+            //         .collect();
+            //
+            //     let plc_results = read_and_reset(plc_interactions).await;
+            //     for (system_name, res) in plc_results {
+            //         system_infos.get_mut(&system_name).unwrap().alarms_active = res;
+            //     }
+            //
+            //     // Send updated clone to GUI
+            //     for (_, system_info) in system_infos.iter_mut() {
+            //         let _ = output.send(Event::Update(system_info.clone())).await;
+            //     }
+            //
+            //     to_reset.clear();
+            //
+            //     let elapsed = start.elapsed();
+            //     println!("Scan took {elapsed:?}");
+            //     if elapsed < Duration::from_millis(3000) {
+            //         sleep(Duration::from_millis(2000)).await;
+            //     }
+            // }
         }
-    })
+    )
 }
 
 

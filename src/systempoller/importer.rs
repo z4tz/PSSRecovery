@@ -1,44 +1,32 @@
 use std::collections::HashMap;
-use std::env;
 use crate::systempoller::{Host, SystemInfo};
 
 use tokio::fs;
 
-pub async fn import(filename: &str) -> HashMap<String, SystemInfo> {
+pub async fn import(filename: &str) -> Result<HashMap<String, SystemInfo>, String> {
     let mut system_infos = HashMap::new();
-    let contents = fs::read_to_string(filename).await.expect(&format!("Error reading file \"{filename}\""));
-    for line in contents.lines() {
-        let parts = line.split(",").collect::<Vec<&str>>();
-        if parts.len() != 2 {  // if invalid line, skip it.
-            continue;
+    match fs::read_to_string(filename).await {
+        Err(e) => {
+            Err(e.to_string())
         }
-        let hostname = parts[0].trim().to_string();
-        let ip_address = parts[1].trim().to_string();
-        let system_name = hostname.split("_").collect::<Vec<&str>>()[0].to_string();
-        let system_info = system_infos.entry(system_name.clone()).or_insert(SystemInfo::new(system_name));
-        if hostname.to_lowercase().contains("eth") {
-            system_info.add_eth(Host::new(hostname, ip_address));
-        }
-        else {
-            system_info.add_node(Host::new(hostname, ip_address));
+        Ok(contents) => {
+            for line in contents.lines() {
+                let parts = line.split(",").collect::<Vec<&str>>();
+                if parts.len() != 2 {  // if invalid line, skip it.
+                    continue;
+                }
+                let hostname = parts[0].trim().to_string();
+                let ip_address = parts[1].trim().to_string();
+                let system_name = hostname.split("_").collect::<Vec<&str>>()[0].to_string();
+                let system_info = system_infos.entry(system_name.clone()).or_insert(SystemInfo::new(system_name));
+                if hostname.to_lowercase().contains("eth") {
+                    system_info.add_eth(Host::new(hostname, ip_address));
+                }
+                else {
+                    system_info.add_node(Host::new(hostname, ip_address));
+                }
+            }
+            Ok(system_infos)
         }
     }
-    system_infos
-}
-
-fn default_filename() -> String {
-    match env::consts::OS {
-        "windows" => {"ip_adresses.txt".to_string()}
-        "linux" => {"ip_adresses.txt".to_string()}
-        "macos" => {"ip_adresses.txt".to_string()}
-        &_ => {"ip_adresses.txt".to_string()}
-    }
-}
-
-pub fn get_filename() -> String {
-    let args: Vec<String> = env::args().collect();
-    if args.len() > 1 {
-        args[1].clone()
-    }
-    else { default_filename() }
 }
