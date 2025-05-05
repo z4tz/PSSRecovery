@@ -11,9 +11,10 @@ pub struct Multipinger{
 impl Multipinger {
     pub fn new(addresses:Vec<String>) -> Multipinger {
         match env::consts::OS {
-            "windows" => {Multipinger {addresses, arguments: vec!["-n".to_string(), "1".to_string(), "-w".to_string(), "1".to_string()]}},
-            "linux" =>   {Multipinger {addresses, arguments: vec!["-c".to_string(), "1".to_string(), "-W".to_string(), "1".to_string()]}},
-            _ =>         {Multipinger {addresses, arguments: vec!["-c".to_string(), "1".to_string(), "-t".to_string(), "1".to_string()]}}, // macos?
+            "windows" => {Multipinger {addresses, arguments: vec!["-n".to_string(), "2".to_string(), "-w".to_string(), "1000".to_string()]}},
+            "linux" =>   {Multipinger {addresses, arguments: vec!["-c".to_string(), "2".to_string(), "-W".to_string(), "1".to_string()]}},
+            "macos" =>   {Multipinger {addresses, arguments: vec!["-c".to_string(), "2".to_string(), "-t".to_string(), "1".to_string()]}},
+            _ =>         {Multipinger {addresses, arguments: vec!["-c".to_string(), "2".to_string(), "-W".to_string(), "1".to_string()]}},  // 
 
         }
     }

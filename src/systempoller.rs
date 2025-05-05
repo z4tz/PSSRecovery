@@ -22,7 +22,7 @@ pub enum Event{
 pub enum BackgroundMessage {
     Reset(String),
     ResetAll,
-    LoacFile(String),
+    LoadFile(String),
 }
 
 pub fn testpoller() -> impl Stream<Item = Event> {
@@ -49,7 +49,7 @@ pub fn testpoller() -> impl Stream<Item = Event> {
                                     BackgroundMessage::ResetAll => {
                                         to_reset.extend(system_infos.keys().cloned().collect::<Vec<_>>());
                                     }
-                                    BackgroundMessage::LoacFile(filename) => {
+                                    BackgroundMessage::LoadFile(filename) => {
                                         match import(&filename).await {
                                             Ok(result) => {
                                                 system_infos= result;
@@ -80,10 +80,16 @@ pub fn testpoller() -> impl Stream<Item = Event> {
                         system_info.update_nodes(&ping_results);
                     }
 
-                    let plc_interactions: Vec<(String, String, bool)> = system_infos.iter()
-                        .map(|(name, sys)| (name.to_string(), sys.get_eth_address(), to_reset.contains(&sys.name)))
-                        .collect();
-
+                    let mut plc_interactions: Vec<(String, String, bool)> = vec![];
+                    for (system_name, system_info) in system_infos.iter_mut() {
+                        if system_info.eths_ok() {  // don't try to contact plc if eth is down
+                            plc_interactions.push((system_name.to_string(), system_info.get_eth_address(), to_reset.contains(&system_name)));
+                        }
+                        else {  // mark active alarms as "unknown" 
+                            system_info.alarms_active = None;
+                        }
+                    }
+                        
                     let plc_results = read_and_reset(plc_interactions).await;
                     for (system_name, res) in plc_results {
                         system_infos.get_mut(&system_name).unwrap().alarms_active = res;
@@ -99,56 +105,9 @@ pub fn testpoller() -> impl Stream<Item = Event> {
 
                     let elapsed = start.elapsed();
                     println!("Scan took {elapsed:?}");
-                    if elapsed < Duration::from_millis(3000) {
-                        sleep(Duration::from_millis(2000)).await;
-                }
+                    sleep(Duration::from_millis(1000)).await;
+                
             }
-            //
-            // let mut system_infos: HashMap<String, SystemInfo> = import(&get_filename()).await;
-            //
-            // let addresses_to_ping: Vec<String> = system_infos.values()
-            //     .map(|sys| sys.get_addresses()).flatten().collect();
-            // let pinger = Multipinger::new(addresses_to_ping);
-            //
-            // loop {
-            //     let start = Instant::now();
-            //
-            //     loop { // fetch all waiting resets
-            //         match receiver.try_next() {
-            //             Ok(Some(message)) => {to_reset.push(message);},
-            //             _ => {break;}
-            //         }
-            //     }
-            //
-            //     let ping_results = pinger.ping_all().await;
-            //     // update each system info
-            //     for (_, system_info) in system_infos.iter_mut() {
-            //         system_info.update_eth(&ping_results);
-            //         system_info.update_nodes(&ping_results);
-            //     }
-            //
-            //     let plc_interactions: Vec<(String, String, bool)> = system_infos.iter()
-            //         .map(|(name, sys)| (name.to_string(), sys.get_eth_address(), to_reset.contains(&sys.name)))
-            //         .collect();
-            //
-            //     let plc_results = read_and_reset(plc_interactions).await;
-            //     for (system_name, res) in plc_results {
-            //         system_infos.get_mut(&system_name).unwrap().alarms_active = res;
-            //     }
-            //
-            //     // Send updated clone to GUI
-            //     for (_, system_info) in system_infos.iter_mut() {
-            //         let _ = output.send(Event::Update(system_info.clone())).await;
-            //     }
-            //
-            //     to_reset.clear();
-            //
-            //     let elapsed = start.elapsed();
-            //     println!("Scan took {elapsed:?}");
-            //     if elapsed < Duration::from_millis(3000) {
-            //         sleep(Duration::from_millis(2000)).await;
-            //     }
-            // }
         }
     )
 }

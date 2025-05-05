@@ -62,7 +62,7 @@ impl RecoveryApp {
                     true => button("Reset all")
                 };
                 let host_info_button = match self.system_map.is_empty() {
-                    false => button("All hosts info").on_press(Message::ResetAll),
+                    false => button("All hosts info").on_press(Message::ShowPopup(PopupState::ShowAll)),
                     true => button("All hosts info")
                 };
 
@@ -81,7 +81,7 @@ impl RecoveryApp {
                     let mut row = Row::new();
                     for (i, system_info) in self.sorted_systems().iter().enumerate() {
                         row = row.push(system_view(system_info));
-                        if i%4 == 3 {
+                        if i%5 == 4 {
                             column = column.push(row);
                             row = Row::new();
                         }
@@ -112,7 +112,7 @@ impl RecoveryApp {
                         let popup = container(
                             column!(
                             text("Hosts not responding:" ).size(20),
-                            scrollable(text(self.popup_text()).width(Length::Fill).size(15)).height(Length::Fill),
+                            scrollable(text(self.host_popup_text()).width(Length::Fill).size(15)).height(Length::Fill),
                             row!(
                                 button("Copy text").on_press(Message::CopyPopupText),
                                 horizontal_space(),
@@ -177,20 +177,20 @@ impl RecoveryApp {
             }
             
             Message::CopyPopupText => {
-                clipboard::write(self.popup_text())
+                clipboard::write(self.host_popup_text())
             }
             Message::FileDialog => {
                 Task::perform(get_filename(),Message::LoadConfig)
             }
             Message::LoadConfig(fileoption) => {
-                self.system_map.clear();
-                match &mut self.state {
-                    State::Loading => {}
-                    State::Running(sender) => {
-                        match fileoption {
-                            None => {}
-                            Some(filename) => {
-                                let _ = sender.try_send(BackgroundMessage::LoacFile(filename));
+                match fileoption {
+                    None => {}  // no file was selected
+                    Some(filename) => {
+                        self.system_map.clear();
+                        match &mut self.state {
+                            State::Loading => {}
+                            State::Running(sender) => {
+                                let _ = sender.try_send(BackgroundMessage::LoadFile(filename));
                             }
                         }
                     }
@@ -204,7 +204,7 @@ impl RecoveryApp {
         Subscription::run(testpoller).map(Message::Data)
     }
 
-    fn popup_text(&self) -> String {
+    fn host_popup_text(&self) -> String {
         match &self.popup_state {
             PopupState::Hidden => {"".to_string()}
             PopupState::ShowSystem(system_name) => {
@@ -305,5 +305,6 @@ fn main() -> iced::Result {
         .theme(|_| Theme::Light).centered()
         .subscription(RecoveryApp::subscription)
         .antialiasing(true)
+        .window_size((1300.0, 800.0))
         .run_with(RecoveryApp::new)
 }
