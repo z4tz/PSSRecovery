@@ -1,5 +1,5 @@
 mod systempoller;
-mod statusbox;
+mod statusled;
 
 use std::collections::HashMap;
 use iced::{Center, Color, Element, Length, Subscription, Task};
@@ -8,8 +8,8 @@ use iced::Theme;
 use iced::widget::{text, column, button, row, container, stack, opaque, mouse_area, center, scrollable, Row, Column, horizontal_space, vertical_space};
 use iced::clipboard;
 use rfd::{AsyncFileDialog};
-use crate::systempoller::{SystemInfo, testpoller, Event, BackgroundMessage};
-use crate::statusbox::{ status_box, Status};
+use crate::systempoller::{SystemInfo, systempoller, Event, BackgroundMessage};
+use crate::statusled::StatusLed;
 
 #[derive(Debug, Clone)]
 enum Message {
@@ -179,9 +179,11 @@ impl RecoveryApp {
             Message::CopyPopupText => {
                 clipboard::write(self.host_popup_text())
             }
+
             Message::FileDialog => {
                 Task::perform(get_filename(),Message::LoadConfig)
             }
+
             Message::LoadConfig(fileoption) => {
                 match fileoption {
                     None => {}  // no file was selected
@@ -201,7 +203,7 @@ impl RecoveryApp {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        Subscription::run(testpoller).map(Message::Data)
+        Subscription::run(systempoller).map(Message::Data)
     }
 
     fn host_popup_text(&self) -> String {
@@ -238,29 +240,26 @@ fn system_view(system_info: &SystemInfo) -> Element<Message> {
 
     let values = column![text(system_info.eth_status()), text(system_info.nodes_status()), text(active_alarms_text)];
 
-    let eth_status = match system_info.eths_ok() {
-        true => {Status::Normal}
-        false => {Status::Fault}
+    let led_size = 20.0;
+    let eth_led = match system_info.eths_ok() {
+        true => {StatusLed::normal(led_size)}
+        false => {StatusLed::fault(led_size)}
     };
-    let nodes_status = match system_info.nodes_ok() {
-        true => {Status::Normal}
-        false => {Status::Fault}
+    let nodes_leds = match system_info.nodes_ok() {
+        true => {StatusLed::normal(led_size)}
+        false => {StatusLed::fault(led_size)}
     };
-    let active_alarms_status = match system_info.active_alarms() {
-        None => {Status::Fault}
+    let active_alarms_led = match system_info.active_alarms() {
+        None => {StatusLed::fault(led_size)}
         Some(value) => {
             match value {
-                true => {Status::Warning}
-                false => {Status::Normal}
+                true => {StatusLed::warning(led_size)}
+                false => {StatusLed::normal(led_size)}
             }
         }
     };
 
-    let statusbox_size = 20.0;
-    let eth_statusbox = status_box(statusbox_size, eth_status);
-    let nodes_statusbox = status_box(statusbox_size, nodes_status);
-    let alarms_statusbox = status_box(statusbox_size, active_alarms_status);
-    let status_boxes = column![eth_statusbox, nodes_statusbox, alarms_statusbox];
+    let status_boxes = column![eth_led, nodes_leds, active_alarms_led];
 
     let content = row!(labels, values, status_boxes).spacing(5);
 

@@ -25,7 +25,7 @@ pub enum BackgroundMessage {
     LoadFile(String),
 }
 
-pub fn testpoller() -> impl Stream<Item = Event> {
+pub fn systempoller() -> impl Stream<Item = Event> {
     stream::channel(1000, |mut output| async move {
             let (sender, mut receiver) = mpsc::channel(1000);
             let _ = output.send(Event::Setup(sender)).await;
@@ -89,7 +89,7 @@ pub fn testpoller() -> impl Stream<Item = Event> {
                             system_info.alarms_active = None;
                         }
                     }
-                        
+
                     let plc_results = read_and_reset(plc_interactions).await;
                     for (system_name, res) in plc_results {
                         system_infos.get_mut(&system_name).unwrap().alarms_active = res;
@@ -101,11 +101,11 @@ pub fn testpoller() -> impl Stream<Item = Event> {
                     }
 
                     to_reset.clear();
-                    }
+                }
 
-                    let elapsed = start.elapsed();
-                    println!("Scan took {elapsed:?}");
-                    sleep(Duration::from_millis(1000)).await;
+                let elapsed = start.elapsed();
+                println!("Scan took {elapsed:?}");
+                sleep(Duration::from_millis(1000)).await;
                 
             }
         }

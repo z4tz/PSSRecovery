@@ -3,27 +3,35 @@ use iced::widget::{canvas, Canvas};
 use iced::{Color, Rectangle, Renderer, Theme};
 
 #[derive(Debug)]
-pub enum Status {
+enum Status {
     Fault,
     Warning,
     Normal
 }
 
 #[derive(Debug)]
-pub struct StatusBox {
+pub struct StatusLed {
     radius: f32,
     status: Status
 }
 
-impl StatusBox {
-    fn new(radius: f32, status: Status) -> StatusBox {
-        StatusBox {radius, status}
+impl StatusLed {
+    fn new<Message>(size: f32, status: Status) -> Canvas<StatusLed, Message> {
+        canvas(StatusLed {radius: size/2.0, status}).width(size).height(size)
+    }
+    pub fn fault<Message>(size: f32) -> Canvas<StatusLed, Message> {
+        Self::new(size, Status::Fault)
+    }
+    pub fn warning<Message>(size: f32) -> Canvas<StatusLed, Message> {
+        Self::new(size, Status::Warning)
+    }
+    pub fn normal<Message>(size: f32) -> Canvas<StatusLed, Message> {
+        Self::new(size, Status::Normal)
     }
 }
 
-impl<Message> canvas::Program<Message> for StatusBox {
-    
-    // No internal state
+impl<Message> canvas::Program<Message> for StatusLed {
+
     type State = ();
     
     fn draw(
@@ -37,7 +45,6 @@ impl<Message> canvas::Program<Message> for StatusBox {
 
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         
-        // We create a `Path` representing a simple circle
         let border = canvas::Path::circle(frame.center(),self.radius-1.0);
         let circle = canvas::Path::circle(frame.center(),self.radius-3.0);
 
@@ -46,16 +53,10 @@ impl<Message> canvas::Program<Message> for StatusBox {
             Status::Warning => {Color::from_rgb(1.0, 0.6471, 0.0)}
             Status::Normal => {Color::from_rgb(0.0, 1.0, 0.0)}
         };
-        
-        // And fill it with some color
+
         frame.fill(&border, Color::BLACK);
         frame.fill(&circle, background_color);
 
-        // Then, we produce the geometry
         vec![frame.into_geometry()]
     }
-}
-
-pub fn status_box<Message>(size: f32, status: Status) -> Canvas<StatusBox, Message> {
-    canvas(StatusBox::new(size/2.0, status)).width(size).height(size)
 }
